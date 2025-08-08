@@ -33,12 +33,12 @@
 namespace logging = boost::log;
 namespace keywords = boost::log::keywords;
 
-typedef struct _POOL_PARTY_CMD_ARGS
-{
-	BOOL bDebugPrivilege;
+typedef struct _POOL_PARTY_CMD_ARGS {
 	int VariantId;
 	int TargetPid;
-} POOL_PARTY_CMD_ARGS, * PPOOL_PARTY_CMD_ARGS;
+	BOOL bDebugPrivilege;
+	std::string ShellcodeFilePath;
+} POOL_PARTY_CMD_ARGS;
 
 class PoolParty
 {
